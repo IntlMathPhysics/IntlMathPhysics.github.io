@@ -396,6 +396,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);display:flex
       <span id="save-status" class="tb-hint">Draft not saved</span>
       <button id="save-btn" class="tb-save" onclick="saveDraftNow()">SAVE DRAFT</button>
       <button id="submit-btn" class="tb-submit" onclick="openModal()">SUBMIT ALL</button>
+      <button class="tb-save" onclick="signOut()">SIGN OUT</button>
     </div>
   </div>
   <div id="page"></div>
@@ -642,6 +643,13 @@ function updateSaveStatus(text){
 
 function saveDraftNow(){
   saveProgress();
+}
+
+function signOut(){
+  try{localStorage.removeItem('sjpo2023_id');}catch(e){}
+  studentName='';
+  studentId='';
+  window.location.reload();
 }
 
 function chSt(ch){

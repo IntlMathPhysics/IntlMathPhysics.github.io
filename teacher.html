@@ -234,6 +234,7 @@ function doLogin(){
 }
 function logout(){
   localStorage.removeItem(SHARED.STORAGE_KEYS.teacherSession);
+  localStorage.removeItem('sjpo2023_teacher_id');
   window.location.reload();
 }
 function refreshAll(){
@@ -246,6 +247,22 @@ function refreshAll(){
   renderQuestionList();
   document.getElementById('teacher-ids').value = SHARED.getTeacherIds().join('\n');
 }
+
+window.addEventListener('storage', (event) => {
+  if (!event.key) return;
+  if (
+    event.key === SHARED.STORAGE_KEYS.submissions ||
+    event.key === SHARED.STORAGE_KEYS.questionBank ||
+    event.key === SHARED.STORAGE_KEYS.teacherIds
+  ) {
+    refreshAll();
+  }
+});
+
+window.addEventListener('focus', refreshAll);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshAll();
+});
 function renderOverview(){
   const studentIds=[...new Set(submissions.map(s=>s.studentId))];
   document.getElementById('stat-students').textContent=studentIds.length;

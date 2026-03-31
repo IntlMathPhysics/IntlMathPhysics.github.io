@@ -7,6 +7,13 @@ window.SJPO_SHARED = (() => {
     studentIds: "sjpo2023_student_ids_v2"
   };
 
+  const LEGACY_STORAGE_KEYS = {
+    questionBank: ["sjpo2023_question_bank"],
+    submissions: ["sjpo2023_submissions"],
+    teacherIds: ["sjpo2023_teacher_ids"],
+    studentIds: ["sjpo2023_student_ids"]
+  };
+
   const DEFAULT_TEACHER_IDS = ["TEACHER001"];
   const DEFAULT_STUDENT_IDS = [
     "IMP1009","IMP1093","IMP1213","IMP1301","IMP1427","IMP1493","IMP1567","IMP1619","IMP1721","IMP1811",
@@ -98,6 +105,19 @@ window.SJPO_SHARED = (() => {
     }
   }
 
+  function safeReadWithLegacy(currentKey, legacyKeys, fallback) {
+    const current = safeRead(currentKey, undefined);
+    if (current !== undefined) return current;
+    for (const legacyKey of legacyKeys || []) {
+      const legacy = safeRead(legacyKey, undefined);
+      if (legacy !== undefined) {
+        safeWrite(currentKey, legacy);
+        return legacy;
+      }
+    }
+    return fallback;
+  }
+
   function safeWrite(key, value) {
     localStorage.setItem(key, JSON.stringify(value));
   }
@@ -136,7 +156,7 @@ window.SJPO_SHARED = (() => {
   }
 
   function getQuestionBank() {
-    return normalizeBank(safeRead(STORAGE_KEYS.questionBank, clone(DEFAULT_BANK)));
+    return normalizeBank(safeReadWithLegacy(STORAGE_KEYS.questionBank, LEGACY_STORAGE_KEYS.questionBank, clone(DEFAULT_BANK)));
   }
 
   function saveQuestionBank(bank) {
@@ -148,7 +168,7 @@ window.SJPO_SHARED = (() => {
   }
 
   function getTeacherIds() {
-    const ids = safeRead(STORAGE_KEYS.teacherIds, DEFAULT_TEACHER_IDS);
+    const ids = safeReadWithLegacy(STORAGE_KEYS.teacherIds, LEGACY_STORAGE_KEYS.teacherIds, DEFAULT_TEACHER_IDS);
     return Array.isArray(ids) ? ids.map((id) => String(id).trim().toUpperCase()).filter(Boolean) : clone(DEFAULT_TEACHER_IDS);
   }
 
@@ -157,7 +177,7 @@ window.SJPO_SHARED = (() => {
   }
 
   function getStudentIds() {
-    const ids = safeRead(STORAGE_KEYS.studentIds, DEFAULT_STUDENT_IDS);
+    const ids = safeReadWithLegacy(STORAGE_KEYS.studentIds, LEGACY_STORAGE_KEYS.studentIds, DEFAULT_STUDENT_IDS);
     return Array.isArray(ids) ? ids.map((id) => String(id).trim().toUpperCase()).filter(Boolean) : clone(DEFAULT_STUDENT_IDS);
   }
 
@@ -262,7 +282,7 @@ window.SJPO_SHARED = (() => {
   }
 
   function getSubmissions() {
-    const submissions = safeRead(STORAGE_KEYS.submissions, []);
+    const submissions = safeReadWithLegacy(STORAGE_KEYS.submissions, LEGACY_STORAGE_KEYS.submissions, []);
     return Array.isArray(submissions) ? submissions : [];
   }
 
