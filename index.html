@@ -163,6 +163,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);display:flex
   font-family:var(--mono);letter-spacing:0.5px;transition:all .15s;
 }
 .tb-submit:hover{background:var(--accent2);}
+.tb-save{
+  background:var(--surf2);color:var(--text);border:1px solid var(--border2);border-radius:6px;
+  padding:7px 18px;font-size:13px;font-weight:600;cursor:pointer;
+  font-family:var(--mono);letter-spacing:0.5px;transition:all .15s;
+}
+.tb-save:hover{border-color:var(--accent2);color:var(--accent);}
+.tb-save.dirty{border-color:var(--yellow,#ffd166);color:var(--yellow,#ffd166);}
+.tb-hint{font-family:var(--mono);font-size:11px;color:var(--muted2);}
 
 /* SUBMIT MODAL */
 #submit-modal{
@@ -217,16 +225,41 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);display:flex
   color:var(--muted);opacity:0.3;
 }
 
+@media (max-width: 900px){
+  body{display:block;}
+  #sidebar{
+    position:static;width:100%;min-width:0;height:auto;border-right:none;border-bottom:1px solid var(--border);
+  }
+  #main{margin-left:0;}
+  .topbar{padding:12px 16px;flex-wrap:wrap;gap:10px;}
+  .ov,.ql{padding:24px 16px 40px;}
+  .stat-row,.ch-grid{grid-template-columns:1fr;}
+  .q-card.open .q-body{grid-template-columns:1fr;min-height:0;}
+  .q-left{padding:24px 20px;border-right:none;border-bottom:1px solid var(--border);}
+  .q-right{padding:20px;}
+  .q-txt{font-size:20px;line-height:1.6;}
+  .opt{font-size:18px;padding:14px 16px;min-height:56px;}
+  .opt-lbl{font-size:18px;}
+  #login-screen > div > div{grid-template-columns:1fr !important;max-width:520px;}
+  #login-screen > div > div > div:nth-child(2){display:none;}
+  .watermark{display:none;}
+}
+
+@media (max-width: 560px){
+  .tb-score{width:100%;text-align:center;}
+  .topbar > div{width:100%;flex-wrap:wrap;}
+  .tb-submit,.tb-save{flex:1;}
+  .q-hd{padding:16px;}
+  .q-prev{font-size:16px;}
+  .q-num{min-width:46px;padding:5px 8px;}
+  .modal-box,.login-box{width:100%;padding:28px 22px;}
+}
+
 </style>
 
 
 </head>
 <body>
-<form name="sjpo2023-results" netlify netlify-honeypot="bot-field" hidden>
-  <input name="bot-field"><input name="student-name"><input name="student-id">
-  <input name="score"><input name="total"><input name="accuracy">
-  <input name="answers"><input name="timestamp">
-</form>
 <div id="login-screen">
   <canvas id="login-canvas" style="position:fixed;inset:0;z-index:0;pointer-events:none;"></canvas>
 
@@ -347,7 +380,9 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);display:flex
     <span id="tb-title" class="tb-title">SJPO 2023</span>
     <div style="display:flex;align-items:center;gap:12px;">
       <div id="tb-score" class="tb-score">Score: <b id="sc">0</b>/50</div>
-      <button onclick="openModal()" style="font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:1px;color:var(--bg);background:var(--accent);border:none;padding:7px 18px;border-radius:4px;cursor:pointer;">SUBMIT</button>
+      <span id="save-status" class="tb-hint">Draft not saved</span>
+      <button id="save-btn" class="tb-save" onclick="saveDraftNow()">SAVE DRAFT</button>
+      <button id="submit-btn" class="tb-submit" onclick="openModal()">SUBMIT ALL</button>
     </div>
   </div>
   <div id="page"></div>
@@ -507,16 +542,41 @@ const QS=[
   {id:50,ch:"Thermal Physics",text:"Laser in glass travels slower than \\(c\\). A co-moving observer measures it even slower. What can you conclude?",opts:["Index of refraction depends on observer's motion.","No contradiction — speed of light need only be constant in same medium.","Maxwell's equations differ between frames, so light speed can change.","Special relativity contradicts itself — hence general relativity."],ans:0},
 ];
 
-const ANSWER_KEY = (window.SJPO_SHARED && window.SJPO_SHARED.ANSWER_KEY) || {};
-const formatAnswerString = (window.SJPO_SHARED && window.SJPO_SHARED.formatAnswerString) || null;
+const SHARED = window.SJPO_SHARED;
+const formatAnswerString = SHARED && SHARED.formatAnswerString;
 const STORAGE_KEY_PREFIX = 'sjpo2023_state_';
 
-QS.forEach(q=>{
-  if(Object.prototype.hasOwnProperty.call(ANSWER_KEY, q.id)) q.ans = ANSWER_KEY[q.id];
-});
+function syncQuestionBankFromShared(){
+  if(!SHARED)return;
+  const bank = SHARED.getQuestionBank();
+  const categoryMap = new Map(bank.categories.map(category => [category.id, category]));
+  const questions = bank.questions.map(question => ({
+    id: question.id,
+    ch: question.chapter || categoryMap.get(question.categoryId)?.name || "",
+    text: question.text,
+    opts: question.options.slice(),
+    ans: question.answer
+  }));
+  const categories = bank.categories.map(category => ({
+    key: category.name,
+    icon: category.icon || "📘",
+    desc: category.description || "",
+    id: category.id,
+    qs: bank.questions.filter(question => question.categoryId === category.id).map(question => question.id)
+  }));
+  QS.splice(0, QS.length, ...questions);
+  CHAPTERS.splice(0, CHAPTERS.length, ...categories);
+  Object.keys(SUBTOPICS).forEach(key => delete SUBTOPICS[key]);
+  bank.questions.forEach(question => {
+    SUBTOPICS[question.id] = question.subtopic || question.chapter || `Question ${question.id}`;
+  });
+}
+
+syncQuestionBankFromShared();
 
 const state={};
 let curCh=null;
+let hasUnsavedChanges=false;
 
 function getProgressStorageKey(id){
   return STORAGE_KEY_PREFIX + id;
@@ -539,7 +599,10 @@ function recomputeEntry(qid, entry){
 function saveProgress(){
   if(!studentId)return;
   try{
-    localStorage.setItem(getProgressStorageKey(studentId), JSON.stringify(state));
+    if(SHARED) SHARED.saveDraft(studentId, state);
+    else localStorage.setItem(getProgressStorageKey(studentId), JSON.stringify(state));
+    hasUnsavedChanges=false;
+    updateSaveStatus('Draft saved');
   }catch(e){}
 }
 
@@ -547,14 +610,25 @@ function loadProgress(id){
   Object.keys(state).forEach(key=>delete state[key]);
   if(!id)return;
   try{
-    const raw=localStorage.getItem(getProgressStorageKey(id));
-    if(!raw)return;
-    const parsed=JSON.parse(raw);
+    const parsed = SHARED ? SHARED.getDraft(id) : JSON.parse(localStorage.getItem(getProgressStorageKey(id)) || '{}');
     Object.entries(parsed).forEach(([qid, entry])=>{
       const normalized=recomputeEntry(Number(qid), entry);
       if(normalized)state[qid]=normalized;
     });
   }catch(e){}
+  hasUnsavedChanges=false;
+  updateSaveStatus('Draft loaded');
+}
+
+function updateSaveStatus(text){
+  const status=document.getElementById('save-status');
+  const btn=document.getElementById('save-btn');
+  if(status)status.textContent=text;
+  if(btn)btn.classList.toggle('dirty', hasUnsavedChanges);
+}
+
+function saveDraftNow(){
+  saveProgress();
 }
 
 function chSt(ch){
@@ -568,7 +642,8 @@ function totSt(){
 }
 function updateBar(){
   const{done,correct}=totSt();
-  document.getElementById('sc-correct').textContent=correct;
+  const scoreEl=document.getElementById('sc');
+  if(scoreEl)scoreEl.textContent=correct;
   ['stat-cor','stat-att','stat-rem','stat-acc'].forEach(id=>{
     const el=document.getElementById(id);
     if(!el)return;
@@ -588,8 +663,8 @@ function renderSidebar(){
     <div class="s-sub">Chapter overview</div>
   </div>
   <div class="s-item sep${curCh==='__all__'?' active':''}" onclick="goAll()">
-    <div class="s-name">📋 All 50 Questions</div>
-    <div class="s-sub">${totSt().done}/50 done · ${totSt().correct} correct</div>
+    <div class="s-name">📋 All Questions</div>
+    <div class="s-sub">${totSt().done}/${QS.length} done · ${totSt().correct} correct</div>
   </div>
   <div class="s-label">Chapters</div>`;
   CHAPTERS.forEach(ch=>{
@@ -606,6 +681,7 @@ function renderSidebar(){
 function renderOv(){
   curCh=null;
   document.getElementById('tb-title').textContent='SJPO 2023 · Overview';
+  document.getElementById('submit-btn').textContent='SUBMIT ALL';
   const{done,correct}=totSt();
   const acc=done?Math.round(correct/done*100):0;
   let cards='';
@@ -621,7 +697,7 @@ function renderOv(){
   document.getElementById('page').innerHTML=`
   <div class="ov">
     <div class="ov-title">SJPO 2023 · QUESTION BANK</div>
-    <div class="ov-sub">Answer all 50 questions. Results are shown immediately after each answer.</div>
+    <div class="ov-sub">Answer by category. Drafts save only when you press save, and submissions only happen when you press submit.</div>
     <div class="stat-row">
       <div class="stat-card"><div class="stat-val" id="stat-cor">${correct}</div><div class="stat-lbl">Correct</div></div>
       <div class="stat-card"><div class="stat-val" id="stat-att">${done}</div><div class="stat-lbl">Attempted</div></div>
@@ -636,6 +712,7 @@ function renderCh(key){
   curCh=key;
   const ch=CHAPTERS.find(c=>c.key===key);
   document.getElementById('tb-title').textContent=`${key} · ${ch.qs.length} questions`;
+  document.getElementById('submit-btn').textContent='SUBMIT CATEGORY';
   const questions=QS.filter(q=>ch.qs.includes(q.id));
   let qh='';
   questions.forEach(q=>{
@@ -710,7 +787,8 @@ function pickAns(qid,idx){
   if(window.MathJax&&!isImgQ)MathJax.typesetPromise([oel]);
   const c=document.getElementById('qc-'+qid);
   if(c)c.querySelector('.q-ico').textContent='●';
-  saveProgress();
+  hasUnsavedChanges=true;
+  updateSaveStatus('Unsaved changes');
   updateBar();renderSidebar();
 }
 
@@ -718,7 +796,8 @@ function goOv(){curCh=null;renderOv();renderSidebar();window.scrollTo(0,0);}
 function goCh(key){curCh=key;renderCh(key);renderSidebar();window.scrollTo(0,0);}
 function goAll(){
   curCh='__all__';
-  document.getElementById('tb-title').textContent='All 50 Questions';
+  document.getElementById('tb-title').textContent='All Questions';
+  document.getElementById('submit-btn').textContent='SUBMIT ALL';
   const allQs=QS.slice().sort((a,b)=>a.id-b.id);
   let qh='';
   allQs.forEach(q=>{
@@ -756,8 +835,8 @@ function goAll(){
   document.getElementById('page').innerHTML=`
   <div class="ql">
     <div class="ql-back" onclick="goOv()">← Back to Overview</div>
-    <div class="ql-title">📋 All 50 Questions</div>
-    <div class="ql-sub">SJPO 2023 · Full Paper · ${totSt().done}/50 done</div>
+    <div class="ql-title">📋 All Questions</div>
+    <div class="ql-sub">SJPO 2023 · Full Paper · ${totSt().done}/${QS.length} done</div>
     ${qh}
   </div>`;
   if(window.MathJax)MathJax.typesetPromise();
@@ -770,29 +849,6 @@ function goAll(){
 let studentName = '';
 let studentId = '';
 
-const VALID_IDS = new Set([
-  'IMP1009','IMP1093','IMP1213','IMP1301','IMP1427',
-  'IMP1493','IMP1567','IMP1619','IMP1721','IMP1811',
-  'IMP1889','IMP1993','IMP2063','IMP2113','IMP2213',
-  'IMP2309','IMP2377','IMP2441','IMP2531','IMP2621',
-  'IMP2689','IMP2791','IMP2909','IMP3023','IMP3109',
-  'IMP3191','IMP3319','IMP3373','IMP3449','IMP3511',
-  'IMP3559','IMP3643','IMP3709','IMP3719','IMP3779',
-  'IMP3797','IMP3877','IMP3943','IMP4073','IMP4211',
-  'IMP4273','IMP4373','IMP4423','IMP4481','IMP4583',
-  'IMP4673','IMP4759','IMP4817','IMP4951','IMP5059',
-  'IMP5153','IMP5273','IMP5351','IMP5471','IMP5569',
-  'IMP5669','IMP5791','IMP5867','IMP5981','IMP6073',
-  'IMP6203','IMP6271','IMP6361','IMP6473','IMP6571',
-  'IMP6691','IMP6779','IMP6833','IMP6949','IMP7013',
-  'IMP7103','IMP7213','IMP7309','IMP7451','IMP7523',
-  'IMP7591','IMP7717','IMP7817','IMP7933','IMP8089',
-  'IMP8221','IMP8291','IMP8423','IMP8543','IMP8629',
-  'IMP8699','IMP8821','IMP8831','IMP8963','IMP9103',
-  'IMP9181','IMP9311','IMP9403','IMP9461','IMP9539',
-  'IMP9601','IMP9689','IMP9803','IMP9859','IMP9967'
-]);;;
-
 function clearSaved(){
   try{localStorage.removeItem('sjpo2023_id');}catch(e){}
   document.getElementById('inp-id').value='';
@@ -802,7 +858,12 @@ function clearSaved(){
 function doLogin(){
   const id = document.getElementById('inp-id').value.trim().toUpperCase();
   if(!id){document.getElementById('inp-id').focus();return;}
-  if(!VALID_IDS.has(id)){
+  if(SHARED && SHARED.isTeacherId(id)){
+    try{localStorage.setItem('sjpo2023_teacher_id', id);}catch(e){}
+    window.location.href='teacher (1).html';
+    return;
+  }
+  if(SHARED && !SHARED.isStudentId(id)){
     const err = document.getElementById('login-err');
     err.textContent = '✗ Student ID not recognised. Please check and try again.';
     err.style.display='block';
@@ -939,7 +1000,105 @@ function doSubmit(){
   xhr.send(formData);
 }
 
-renderSidebar();renderOv();
+function getSubmissionScope(){
+  if(curCh && curCh!=='__all__'){
+    const category = CHAPTERS.find(ch=>ch.key===curCh);
+    return {
+      type:'category',
+      id:category?.id || null,
+      name:category?.key || curCh,
+      questionIds:category?.qs || []
+    };
+  }
+  return {
+    type:'all',
+    id:null,
+    name:'All Questions',
+    questionIds:QS.map(q=>q.id)
+  };
+}
+
+doLogin = function(){
+  const id = document.getElementById('inp-id').value.trim().toUpperCase();
+  const err = document.getElementById('login-err');
+  if(err)err.style.display='none';
+  if(!id){document.getElementById('inp-id').focus();return;}
+  if(SHARED && SHARED.isTeacherId(id)){
+    try{localStorage.setItem('sjpo2023_teacher_id', id);}catch(e){}
+    window.location.href='teacher (1).html';
+    return;
+  }
+  if(SHARED && !SHARED.isStudentId(id)){
+    if(err){
+      err.textContent='✗ ID not recognised. Please check and try again.';
+      err.style.display='block';
+    }
+    document.getElementById('inp-id').focus();
+    return;
+  }
+  studentName = id;
+  studentId = id;
+  try{localStorage.setItem('sjpo2023_id', id);}catch(e){}
+  loadProgress(id);
+  document.getElementById('login-screen').style.display='none';
+  renderSidebar();
+  renderOv();
+  updateBar();
+};
+
+openModal = function(){
+  const scope = getSubmissionScope();
+  const scopedMetrics = scope.type==='category'
+    ? {
+        done: scope.questionIds.filter(id=>state[id]).length,
+        correct: scope.questionIds.filter(id=>state[id]?.correct).length
+      }
+    : totSt();
+  const acc = scopedMetrics.done ? Math.round(scopedMetrics.correct / scopedMetrics.done * 100) : 0;
+  document.getElementById('modal-score').textContent=`${scopedMetrics.correct}/${scope.questionIds.length}`;
+  document.getElementById('modal-sub').textContent=`${scope.name} · ${scopedMetrics.done} attempted · ${acc}% accuracy`;
+  document.getElementById('modal-msg').className='modal-msg';
+  document.getElementById('modal-btn').disabled=false;
+  document.getElementById('modal-btn').textContent=scope.type==='category'?'Submit Category →':'Submit All →';
+  document.getElementById('submit-modal').classList.add('show');
+};
+
+doSubmit = function(){
+  const btn=document.getElementById('modal-btn');
+  const msg=document.getElementById('modal-msg');
+  const scope=getSubmissionScope();
+  const answersByQuestion={};
+  scope.questionIds.forEach(qid=>{
+    const entry=state[qid];
+    answersByQuestion[qid]=entry?{selectedIndex:entry.sel}:null;
+  });
+  const metrics=SHARED.recomputeSubmissionMetrics(
+    SHARED.formatAnswerString(answersByQuestion, SHARED.getQuestionBank(), scope.questionIds),
+    SHARED.getQuestionBank(),
+    scope.questionIds
+  );
+  const submission={
+    studentName,
+    studentId,
+    scopeType:scope.type,
+    scopeId:scope.id,
+    scopeName:scope.name,
+    answers:SHARED.formatAnswerString(answersByQuestion, SHARED.getQuestionBank(), scope.questionIds),
+    score:metrics.correct,
+    attempted:metrics.attempted,
+    total:metrics.total,
+    accuracy:metrics.accuracy,
+    submittedAt:new Date().toISOString()
+  };
+  btn.disabled=true;
+  SHARED.addSubmission(submission);
+  saveProgress();
+  msg.className='modal-msg ok';
+  msg.textContent=`✓ ${scope.name} submitted locally.`;
+  btn.textContent='Submitted ✓';
+};
+
+renderSidebar();renderOv();updateBar();updateSaveStatus('Draft not saved');
 </script>
 
 <div class="watermark">
