@@ -215,7 +215,7 @@ let bank = SHARED.getQuestionBank();
 let submissions = SHARED.getSubmissions();
 let editingQuestionId = null;
 
-function goStudent(){ window.location.assign('./index%20(1).html'); }
+function goStudent(){ window.location.assign('./index.html'); }
 function switchTab(tab){
   document.querySelectorAll('.tab').forEach(el=>el.classList.toggle('active', el.dataset.tab===tab));
   document.querySelectorAll('.panel').forEach(el=>el.classList.toggle('active', el.id===`panel-${tab}`));

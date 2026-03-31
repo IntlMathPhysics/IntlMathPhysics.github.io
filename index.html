@@ -641,9 +641,7 @@ function updateSaveStatus(text){
 }
 
 function saveDraftNow(){
-  lockSubmittedScope(scope);
   saveProgress();
-  refreshCurrentView();
 }
 
 function chSt(ch){
@@ -875,7 +873,7 @@ function doLogin(){
   if(!id){document.getElementById('inp-id').focus();return;}
   if(SHARED && SHARED.isTeacherId(id)){
     try{localStorage.setItem('sjpo2023_teacher_id', id);}catch(e){}
-    window.location.assign('./teacher%20(1).html');
+    window.location.assign('./teacher.html');
     return;
   }
   if(SHARED && !SHARED.isStudentId(id)){
@@ -1054,7 +1052,7 @@ doLogin = function(){
   if(!id){document.getElementById('inp-id').focus();return;}
   if(SHARED && SHARED.isTeacherId(id)){
     try{localStorage.setItem('sjpo2023_teacher_id', id);}catch(e){}
-    window.location.assign('./teacher%20(1).html');
+    window.location.assign('./teacher.html');
     return;
   }
   if(SHARED && !SHARED.isStudentId(id)){
