@@ -227,11 +227,23 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);display:flex
 
 @media (max-width: 900px){
   body{display:block;}
+  #login-screen{
+    position:absolute;
+    overflow-y:auto;
+    align-items:flex-start;
+    padding-top:max(16px, env(safe-area-inset-top));
+  }
   #sidebar{
     position:static;width:100%;min-width:0;height:auto;border-right:none;border-bottom:1px solid var(--border);
   }
   #main{margin-left:0;}
-  .topbar{padding:12px 16px;flex-wrap:wrap;gap:10px;}
+  .topbar{
+    position:sticky;
+    top:0;
+    padding:calc(12px + env(safe-area-inset-top)) 16px 12px;
+    flex-wrap:wrap;
+    gap:10px;
+  }
   .ov,.ql{padding:24px 16px 40px;}
   .stat-row,.ch-grid{grid-template-columns:1fr;}
   .q-card.open .q-body{grid-template-columns:1fr;min-height:0;}
@@ -240,6 +252,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);display:flex
   .q-txt{font-size:20px;line-height:1.6;}
   .opt{font-size:18px;padding:14px 16px;min-height:56px;}
   .opt-lbl{font-size:18px;}
+  #login-screen > div{min-height:auto !important;align-items:flex-start !important;padding:16px 14px 28px !important;}
   #login-screen > div > div{grid-template-columns:1fr !important;max-width:520px;}
   #login-screen > div > div > div:nth-child(2){display:none;}
   .watermark{display:none;}
@@ -628,7 +641,9 @@ function updateSaveStatus(text){
 }
 
 function saveDraftNow(){
+  lockSubmittedScope(scope);
   saveProgress();
+  refreshCurrentView();
 }
 
 function chSt(ch){
@@ -860,7 +875,7 @@ function doLogin(){
   if(!id){document.getElementById('inp-id').focus();return;}
   if(SHARED && SHARED.isTeacherId(id)){
     try{localStorage.setItem('sjpo2023_teacher_id', id);}catch(e){}
-    window.location.href='teacher (1).html';
+    window.location.assign('./teacher%20(1).html');
     return;
   }
   if(SHARED && !SHARED.isStudentId(id)){
@@ -1018,6 +1033,20 @@ function getSubmissionScope(){
   };
 }
 
+function lockSubmittedScope(scope){
+  scope.questionIds.forEach(qid=>{
+    if(state[qid]) state[qid].locked = true;
+  });
+}
+
+function refreshCurrentView(){
+  if(curCh===null) renderOv();
+  else if(curCh==='__all__') goAll();
+  else renderCh(curCh);
+  renderSidebar();
+  updateBar();
+}
+
 doLogin = function(){
   const id = document.getElementById('inp-id').value.trim().toUpperCase();
   const err = document.getElementById('login-err');
@@ -1025,7 +1054,7 @@ doLogin = function(){
   if(!id){document.getElementById('inp-id').focus();return;}
   if(SHARED && SHARED.isTeacherId(id)){
     try{localStorage.setItem('sjpo2023_teacher_id', id);}catch(e){}
-    window.location.href='teacher (1).html';
+    window.location.assign('./teacher%20(1).html');
     return;
   }
   if(SHARED && !SHARED.isStudentId(id)){
@@ -1044,6 +1073,7 @@ doLogin = function(){
   renderSidebar();
   renderOv();
   updateBar();
+  window.scrollTo(0,0);
 };
 
 openModal = function(){
@@ -1096,6 +1126,48 @@ doSubmit = function(){
   msg.className='modal-msg ok';
   msg.textContent=`✓ ${scope.name} submitted locally.`;
   btn.textContent='Submitted ✓';
+};
+
+doSubmit = function(){
+  const btn=document.getElementById('modal-btn');
+  const msg=document.getElementById('modal-msg');
+  const scope=getSubmissionScope();
+  const answersByQuestion={};
+  scope.questionIds.forEach(qid=>{
+    const entry=state[qid];
+    answersByQuestion[qid]=entry?{selectedIndex:entry.sel}:null;
+  });
+  const answerString = SHARED.formatAnswerString(answersByQuestion, SHARED.getQuestionBank(), scope.questionIds);
+  const metrics=SHARED.recomputeSubmissionMetrics(answerString, SHARED.getQuestionBank(), scope.questionIds);
+  const submission={
+    studentName,
+    studentId,
+    scopeType:scope.type,
+    scopeId:scope.id,
+    scopeName:scope.name,
+    answers:answerString,
+    score:metrics.correct,
+    attempted:metrics.attempted,
+    total:metrics.total,
+    accuracy:metrics.accuracy,
+    submittedAt:new Date().toISOString()
+  };
+  btn.disabled=true;
+  SHARED.addSubmission(submission);
+  lockSubmittedScope(scope);
+  saveProgress();
+  refreshCurrentView();
+  msg.className='modal-msg ok';
+  msg.textContent=`✓ ${scope.name} submitted locally.`;
+  btn.textContent='Done';
+  if(scope.type==='category'){
+    setTimeout(()=>{
+      closeModal();
+      goOv();
+    }, 500);
+  }else{
+    setTimeout(()=>{ closeModal(); }, 500);
+  }
 };
 
 renderSidebar();renderOv();updateBar();updateSaveStatus('Draft not saved');
