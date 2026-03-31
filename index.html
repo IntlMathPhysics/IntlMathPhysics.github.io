@@ -12,6 +12,7 @@ MathJax = {
 };
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-chtml.min.js"></script>
+<script src="shared-data.js"></script>
 <style>
 :root {
   --bg:#0b0d12; --surf:#11141c; --surf2:#181c27; --surf3:#1e2230;
@@ -506,8 +507,55 @@ const QS=[
   {id:50,ch:"Thermal Physics",text:"Laser in glass travels slower than \\(c\\). A co-moving observer measures it even slower. What can you conclude?",opts:["Index of refraction depends on observer's motion.","No contradiction — speed of light need only be constant in same medium.","Maxwell's equations differ between frames, so light speed can change.","Special relativity contradicts itself — hence general relativity."],ans:0},
 ];
 
+const ANSWER_KEY = (window.SJPO_SHARED && window.SJPO_SHARED.ANSWER_KEY) || {};
+const formatAnswerString = (window.SJPO_SHARED && window.SJPO_SHARED.formatAnswerString) || null;
+const STORAGE_KEY_PREFIX = 'sjpo2023_state_';
+
+QS.forEach(q=>{
+  if(Object.prototype.hasOwnProperty.call(ANSWER_KEY, q.id)) q.ans = ANSWER_KEY[q.id];
+});
+
 const state={};
 let curCh=null;
+
+function getProgressStorageKey(id){
+  return STORAGE_KEY_PREFIX + id;
+}
+
+function getQuestionById(qid){
+  return QS.find(q=>q.id===qid);
+}
+
+function recomputeEntry(qid, entry){
+  const q=getQuestionById(qid);
+  if(!q||!entry||!Number.isInteger(entry.sel))return null;
+  return {
+    sel: entry.sel,
+    correct: entry.sel===q.ans,
+    locked: !!entry.locked
+  };
+}
+
+function saveProgress(){
+  if(!studentId)return;
+  try{
+    localStorage.setItem(getProgressStorageKey(studentId), JSON.stringify(state));
+  }catch(e){}
+}
+
+function loadProgress(id){
+  Object.keys(state).forEach(key=>delete state[key]);
+  if(!id)return;
+  try{
+    const raw=localStorage.getItem(getProgressStorageKey(id));
+    if(!raw)return;
+    const parsed=JSON.parse(raw);
+    Object.entries(parsed).forEach(([qid, entry])=>{
+      const normalized=recomputeEntry(Number(qid), entry);
+      if(normalized)state[qid]=normalized;
+    });
+  }catch(e){}
+}
 
 function chSt(ch){
   const ids=ch?ch.qs:QS.map(q=>q.id);
@@ -662,6 +710,7 @@ function pickAns(qid,idx){
   if(window.MathJax&&!isImgQ)MathJax.typesetPromise([oel]);
   const c=document.getElementById('qc-'+qid);
   if(c)c.querySelector('.q-ico').textContent='●';
+  saveProgress();
   updateBar();renderSidebar();
 }
 
@@ -763,6 +812,7 @@ function doLogin(){
   studentName = id;
   studentId = id;
   try{localStorage.setItem('sjpo2023_id', id);}catch(e){}
+  loadProgress(id);
   document.getElementById('login-screen').style.display='none';
   document.getElementById('tb-title').textContent = `SJPO 2023 · ${id}`;
   renderSidebar();
@@ -833,6 +883,7 @@ function revealAll(){
       v.textContent=s.correct?'✓ Correct':'✗ Incorrect';
     }
   });
+  saveProgress();
 }
 
 function doSubmit(){
@@ -845,12 +896,14 @@ function doSubmit(){
   const acc=done?Math.round(correct/done*100):0;
 
   // Build answers string: "Q1:A(✓) Q2:C(✗) ..."
-  const answersArr = QS.map(q=>{
-    const s=state[q.id];
-    if(!s) return `Q${q.id}:-`;
-    const lbl=String.fromCharCode(65+s.sel);
-    return `Q${q.id}:${lbl}(${s.correct?'✓':'✗'})`;
-  });
+  const answersPayload = formatAnswerString
+    ? formatAnswerString(Object.fromEntries(Object.entries(state).map(([qid, entry])=>[qid,{selectedIndex:entry.sel}])))
+    : QS.map(q=>{
+        const s=state[q.id];
+        if(!s) return `Q${q.id}:-`;
+        const lbl=String.fromCharCode(65+s.sel);
+        return `Q${q.id}:${lbl}(${s.correct?'✓':'✗'})`;
+      }).join(' ');
 
   const formData = new FormData();
   formData.append('form-name','sjpo2023-results');
@@ -859,7 +912,7 @@ function doSubmit(){
   formData.append('score', correct);
   formData.append('total', 50);
   formData.append('accuracy', acc+'%');
-  formData.append('answers', answersArr.join(' '));
+  formData.append('answers', answersPayload);
   formData.append('timestamp', new Date().toISOString());
 
   const xhr = new XMLHttpRequest();

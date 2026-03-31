@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SJPO 2023 · Teacher Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="shared-data.js"></script>
 <style>
 :root {
   --bg:#0b0d12; --surf:#11141c; --surf2:#181c27; --surf3:#1e2230;
@@ -173,10 +174,11 @@ tr:hover td{background:var(--surf2);}
 
   <!-- ANSWER KEY -->
   <div class="panel" id="panel-5">
-    <div class="section-title">Answer Key Editor — Click A/B/C/D/E to change answer, then Export new index.html</div>
+    <div class="section-title">Answer Key Editor — Click A/B/C/D/E to change answer, then export the updated shared answer key</div>
     <div style="margin-bottom:20px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-      <button onclick="exportIndex()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--mono);">⬇ Export new index.html</button>
-      <span style="font-size:13px;color:var(--muted2);">After export, upload the file to Netlify to update the live quiz.</span>
+      <button onclick="exportIndex()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--mono);">⬇ Export shared-data.js</button>
+      <button onclick="exportCsv()" style="background:var(--surf2);color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:12px 28px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--mono);">⬇ Export CSV</button>
+      <span style="font-size:13px;color:var(--muted2);">Upload the exported shared data file with your site to update both the live quiz and dashboard.</span>
     </div>
     <div class="table-wrap">
       <table><thead><tr>
@@ -198,6 +200,8 @@ const PW = null; // No password required
 const TOKEN = 'nfp_aUGghBKz3TV218eZoaZ5z9WtPL2UYaBDb311';
 const SITE_ID = 'e9588037-034d-4a5b-bf31-1128057cde93';
 const FORM_NAME = 'sjpo2023-results';
+const SHARED = window.SJPO_SHARED || {};
+const TOTAL_QUESTIONS = SHARED.TOTAL_QUESTIONS || 50;
 
 const CH = {
   1:'Kinematics & Dynamics',2:'Kinematics & Dynamics',3:'Kinematics & Dynamics',
@@ -240,6 +244,7 @@ function getId(s){
 }
 
 function parseAns(str){
+  if(SHARED.parseAnswerString)return SHARED.parseAnswerString(str);
   const r={};
   if(!str)return r;
   for(const m of str.matchAll(/Q(\d+):([A-E-])\((✓|✗|-)\)/g)){
@@ -250,6 +255,19 @@ function parseAns(str){
 
 function scCls(s){return s>=35?'hi':s>=20?'mid':'lo';}
 
+function enrichSubmission(submission){
+  const metrics = SHARED.recomputeSubmissionMetrics
+    ? SHARED.recomputeSubmissionMetrics(submission.data.answers || '')
+    : { parsed: parseAns(submission.data.answers || ''), attempted: 0, correct: 0, total: TOTAL_QUESTIONS, accuracy: 0 };
+  return {
+    ...submission,
+    _answers: metrics.parsed,
+    _attempted: metrics.attempted,
+    _score: metrics.correct,
+    _accuracy: metrics.accuracy
+  };
+}
+
 async function loadData(){
   try{
     const fr=await fetch(`https://api.netlify.com/api/v1/sites/${SITE_ID}/forms`,{headers:{'Authorization':`Bearer ${TOKEN}`}});
@@ -257,7 +275,7 @@ async function loadData(){
     const form=forms.find(f=>f.name===FORM_NAME);
     if(!form){alert('Form not found — make sure at least one student has submitted.');return;}
     const sr=await fetch(`https://api.netlify.com/api/v1/forms/${form.id}/submissions?per_page=100`,{headers:{'Authorization':`Bearer ${TOKEN}`}});
-    allSubs=await sr.json();
+    allSubs=(await sr.json()).map(enrichSubmission);
     latestByID={};
     allSubs.forEach(s=>{
       const id=getId(s);
@@ -274,24 +292,24 @@ function render(){
   if(!students.length){document.getElementById('ov-tbody').innerHTML='<tr><td colspan="6" class="loading">No submissions yet.</td></tr>';return;}
 
   // stats
-  const scores=latest.map(s=>+s.data.score||0);
+  const scores=latest.map(s=>s._score||0);
   const avg=Math.round(scores.reduce((a,b)=>a+b)/scores.length);
   document.getElementById('st-n').textContent=students.length;
-  document.getElementById('st-avg').textContent=avg+'/50';
-  document.getElementById('st-hi').textContent=Math.max(...scores)+'/50';
-  document.getElementById('st-lo').textContent=Math.min(...scores)+'/50';
+  document.getElementById('st-avg').textContent=avg+'/'+TOTAL_QUESTIONS;
+  document.getElementById('st-hi').textContent=Math.max(...scores)+'/'+TOTAL_QUESTIONS;
+  document.getElementById('st-lo').textContent=Math.min(...scores)+'/'+TOTAL_QUESTIONS;
   document.getElementById('st-att').textContent=allSubs.filter(s=>getId(s)!=='unknown').length;
 
   // per-question stats from latest submissions
   const qC={},qT={};
-  for(let i=1;i<=50;i++){qC[i]=0;qT[i]=0;}
+  for(let i=1;i<=TOTAL_QUESTIONS;i++){qC[i]=0;qT[i]=0;}
   latest.forEach(s=>{
-    Object.entries(parseAns(s.data.answers)).forEach(([q,d])=>{
+    Object.entries(s._answers).forEach(([q,d])=>{
       qT[+q]++;if(d.correct)qC[+q]++;
     });
   });
   const qR={};
-  for(let i=1;i<=50;i++) qR[i]=qT[i]?Math.round(qC[i]/qT[i]*100):null;
+  for(let i=1;i<=TOTAL_QUESTIONS;i++) qR[i]=qT[i]?Math.round(qC[i]/qT[i]*100):null;
 
   // top 5 hardest
   const sorted_q=Object.entries(qR).filter(([,v])=>v!==null).sort((a,b)=>a[1]-b[1]);
@@ -309,13 +327,13 @@ function render(){
 
   // overview table sorted by best score
   const sortedS=[...students].sort((a,b)=>{
-    const sa=Math.max(...allSubs.filter(s=>getId(s)===a).map(s=>+s.data.score||0));
-    const sb=Math.max(...allSubs.filter(s=>getId(s)===b).map(s=>+s.data.score||0));
+    const sa=Math.max(...allSubs.filter(s=>getId(s)===a).map(s=>s._score||0));
+    const sb=Math.max(...allSubs.filter(s=>getId(s)===b).map(s=>s._score||0));
     return sb-sa;
   });
   document.getElementById('ov-tbody').innerHTML=sortedS.map(id=>{
     const subs=allSubs.filter(s=>getId(s)===id).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-    const sc=subs.map(s=>+s.data.score||0);
+    const sc=subs.map(s=>s._score||0);
     const best=Math.max(...sc);
     const last=sc[sc.length-1];
     const prev=sc.length>1?sc[sc.length-2]:null;
@@ -329,8 +347,8 @@ function render(){
     return `<tr>
       <td style="font-family:var(--mono);">${id}</td>
       <td style="font-family:var(--mono);">${subs.length}</td>
-      <td class="${scCls(best)}">${best}/50</td>
-      <td class="${scCls(last)}">${last}/50</td>
+      <td class="${scCls(best)}">${best}/${TOTAL_QUESTIONS}</td>
+      <td class="${scCls(last)}">${last}/${TOTAL_QUESTIONS}</td>
       <td>${trend}</td>
       <td style="font-size:12px;color:var(--muted2);">${date}</td>
     </tr>`;
@@ -339,10 +357,10 @@ function render(){
   // ── PANEL 1: STUDENTS ──
   document.getElementById('sg-wrap').innerHTML=sortedS.map(id=>{
     const subs=allSubs.filter(s=>getId(s)===id).sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-    const sc=subs.map(s=>+s.data.score||0);
+    const sc=subs.map(s=>s._score||0);
     const best=Math.max(...sc);
     const rows=subs.map((s,i)=>{
-      const score=+s.data.score||0;
+      const score=s._score||0;
       const prev=i>0?sc[i-1]:null;
       let trend='';
       if(prev!==null){
@@ -353,8 +371,8 @@ function render(){
       const date=new Date(s.created_at).toLocaleString('en-SG',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
       return `<tr>
         <td style="font-family:var(--mono);font-size:12px;color:var(--muted);">Attempt ${i+1}</td>
-        <td class="${scCls(score)}">${score}/50</td>
-        <td style="font-family:var(--mono);font-size:12px;">${s.data.accuracy||'–'}</td>
+        <td class="${scCls(score)}">${score}/${TOTAL_QUESTIONS}</td>
+        <td style="font-family:var(--mono);font-size:12px;">${s._accuracy}%</td>
         <td>${trend}</td>
         <td style="font-size:12px;color:var(--muted2);">${date}</td>
       </tr>`;
@@ -363,7 +381,7 @@ function render(){
       <div class="sg-hd" onclick="toggleSG('${id}')">
         <span class="sg-id">${id}</span>
         <span class="sg-cnt">${subs.length} attempt${subs.length>1?'s':''}</span>
-        <span class="sg-best ${scCls(best)}">Best: ${best}/50</span>
+        <span class="sg-best ${scCls(best)}">Best: ${best}/${TOTAL_QUESTIONS}</span>
         <span class="sg-chev">▼</span>
       </div>
       <div class="sg-body">
@@ -388,7 +406,7 @@ function render(){
   // ── PANEL 3: CHAPTERS ──
   document.getElementById('ch-head').innerHTML='<th>Student ID</th>'+CH_LIST.map(c=>`<th>${c}</th>`).join('')+'<th>Weakest</th>';
   document.getElementById('ch-body').innerHTML=sortedS.map(id=>{
-    const ans=parseAns(latestByID[id].data.answers);
+    const ans=latestByID[id]._answers;
     const chC={},chT={};
     CH_LIST.forEach(c=>{chC[c]=0;chT[c]=0;});
     Object.entries(ans).forEach(([q,d])=>{
@@ -406,10 +424,10 @@ function render(){
   }).join('');
 
   // ── PANEL 4: HEATMAP ──
-  const qs=Array.from({length:50},(_,i)=>i+1);
+  const qs=Array.from({length:TOTAL_QUESTIONS},(_,i)=>i+1);
   let hm='<table class="hm-table"><thead><tr><th></th>'+qs.map(q=>`<th>Q${q}</th>`).join('')+'</tr></thead><tbody>';
   sortedS.forEach(id=>{
-    const ans=parseAns(latestByID[id].data.answers);
+    const ans=latestByID[id]._answers;
     hm+=`<tr><td class="sid-cell">${id}</td>`;
     qs.forEach(q=>{
       const a=ans[q];
@@ -432,6 +450,14 @@ const INDEX_B64 = "PCFET0NUWVBFIGh0bWw+CjxodG1sIGxhbmc9ImVuIj4KPGhlYWQ+CjxtZXRhI
 const AK_QS = [{"id": 1, "ch": "Kinematics", "preview": "A smooth hollow cone of half-angle (…) is inverted with its axis vertical. A particle of m", "ans": 3}, {"id": 2, "ch": "Kinematics", "preview": "Chris is seated on a northbound train when he sees a southbound train approaching him with", "ans": 3}, {"id": 3, "ch": "Kinematics", "preview": "A particle travels in a straight path with constant acceleration. The particle has velocit", "ans": 4}, {"id": 4, "ch": "Dynamics & Forces", "preview": "(…) identical blocks (where (…)) are placed side-by-side in a horizontal row on frictionle", "ans": 4}, {"id": 5, "ch": "Dynamics & Forces", "preview": "A uniform chain of length (…) is placed on a frictionless table, with a length (…) hanging", "ans": 0}, {"id": 6, "ch": "Dynamics & Forces", "preview": "The same chain (length (…), with (…) hanging) now rests on a surface with friction and sti", "ans": 1}, {"id": 7, "ch": "Dynamics & Forces", "preview": "In a \"circular pendulum\", a mass (…) is suspended by a string of length (…) and travels", "ans": 2}, {"id": 8, "ch": "Dynamics & Forces", "preview": "On board a shaky bus, Galen observes a glass of water and notices its surface to be tilted", "ans": 3}, {"id": 9, "ch": "Dynamics & Forces", "preview": "A tired delivery worker has a cube-shaped box of mass (…) and side length (…) on the groun", "ans": 1}, {"id": 10, "ch": "Energy & Momentum", "preview": "A ball is dropped from rest onto an inclined slope. Assuming there are no energy losses, w", "ans": 1}, {"id": 11, "ch": "Energy & Momentum", "preview": "Paul fires an arrow at initial speed (…) towards a target a distance (…) away from him. He", "ans": 1}, {"id": 12, "ch": "Energy & Momentum", "preview": "Bobo and Nana are initially at rest on icy frictionless ground. Bobo has mass (…) and Nana", "ans": 2}, {"id": 13, "ch": "Rotation & Rigid Bodies", "preview": "The frame of an umbrella is constructed by attaching 6 uniform rods, each of mass (…) kg a", "ans": 0}, {"id": 14, "ch": "Rotation & Rigid Bodies", "preview": "Three identical point masses (…) are connected by strings of length (…) in the vertical pl", "ans": 2}, {"id": 15, "ch": "Energy & Momentum", "preview": "A mass (…) is suspended at rest by an ideal spring of force constant (…). An extra mass is", "ans": 4}, {"id": 16, "ch": "Rotation & Rigid Bodies", "preview": "Brian wants to bridge two cliffs using a plank of length (…). The plank itself is essentia", "ans": 3}, {"id": 17, "ch": "Rotation & Rigid Bodies", "preview": "A horizontal turntable of radius (…) rotates with constant angular velocity (…). An ant, p", "ans": 0}, {"id": 18, "ch": "Rotation & Rigid Bodies", "preview": "A car drives at a constant speed along a horizontal road of width (…) that has a sharp 90°", "ans": 3}, {"id": 19, "ch": "Oscillations & SHM", "preview": "A mass is suspended from a light inextensible string of length (…) cm. The top end of the", "ans": 0}, {"id": 20, "ch": "Rotation & Rigid Bodies", "preview": "A uniform solid disc rests flat on a frictionless table. A brief tangential impulse is app", "ans": 3}, {"id": 21, "ch": "Gravitation", "preview": "A uniform solid sphere is placed at the top of a valley and released from rest. It rolls d", "ans": 3}, {"id": 22, "ch": "Gravitation", "preview": "Two satellites X and Y orbit the same planet and have equal masses. The orbit of satellite", "ans": 1}, {"id": 23, "ch": "Gravitation", "preview": "In an experiment gone very wrong, Shuhao accidentally created a clone of Earth with the sa", "ans": 2}, {"id": 24, "ch": "Optics", "preview": "An L-shaped pipe is placed into a river flowing at speed (…), with the open end facing the", "ans": 0}, {"id": 25, "ch": "Optics", "preview": "A wooden cube of density (…) and side length (…) floats in a fluid of density (…) and unde", "ans": 3}, {"id": 26, "ch": "Optics", "preview": "A ray of light enters a spherical droplet. Its resulting trajectory traces the shape of a", "ans": 0}, {"id": 27, "ch": "Optics", "preview": "A man of height (…) m stands facing a plane mirror hung vertically. The bottom of the mirr", "ans": 3}, {"id": 28, "ch": "Optics", "preview": "Rays from the Sun are brought through a convex lens with a focal length of (…) cm and a ci", "ans": 0}, {"id": 29, "ch": "Electricity", "preview": "Consider a cube of side length (…). 7 identical charges (…) and one additional charge (…)", "ans": 3}, {"id": 30, "ch": "Electricity", "preview": "Consider again a cube of side length (…). This time, a charge (…) is spread uniformly acro", "ans": 4}, {"id": 31, "ch": "Electricity", "preview": "A conducting sphere of charge (…) and radius (…) is placed in the centre of a spherical co", "ans": 0}, {"id": 32, "ch": "Electricity", "preview": "Find the power dissipated by the 3 Ω resistor in the circuit below.", "ans": 1}, {"id": 33, "ch": "Electricity", "preview": "A tetrahedron is made out of 6 identical resistors of resistance (…) forming each of its e", "ans": 2}, {"id": 34, "ch": "Electricity", "preview": "Three initially uncharged capacitors are connected with a battery as shown in the circuit", "ans": 0}, {"id": 35, "ch": "Magnetism", "preview": "Two horizontal wires A and B carry currents in perpendicular directions, with the top view", "ans": 0}, {"id": 36, "ch": "Magnetism", "preview": "An electron is imparted an initial velocity (…) in a region of uniform magnetic field (…)", "ans": 1}, {"id": 37, "ch": "Magnetism", "preview": "Two identical thin, wide and parallel square metal plates each carry a uniform current (…)", "ans": 0}, {"id": 38, "ch": "Magnetism", "preview": "A metal disc of radius (…) is driven to rotate with constant angular velocity (…) about it", "ans": 3}, {"id": 39, "ch": "Waves & Sound", "preview": "Shaun strings two beads on a light uniform thread, one of mass (…) fixed at the middle and", "ans": 3}, {"id": 40, "ch": "Waves & Sound", "preview": "The displacement (…) of a transverse wave on a string of length (…) can be written as a fu", "ans": 3}, {"id": 41, "ch": "Waves & Sound", "preview": "Two sources are set in phase and produce beams of plane-polarised light that have equal am", "ans": 3}, {"id": 42, "ch": "Optics", "preview": "Consider a variation of Young's double slit experiment where the light entering the two sl", "ans": 4}, {"id": 43, "ch": "Optics", "preview": "Consider now an ideal diffraction grating with slit spacing (…). Light of wavelength (…) e", "ans": 1}, {"id": 44, "ch": "Thermal Physics", "preview": "Paul has a glass of water that contains a mass (…) g of water at temperature (…). He tries", "ans": 0}, {"id": 45, "ch": "Thermal Physics", "preview": "Three metal slabs are placed in thermal contact between a hot reservoir of temperature (…)", "ans": 2}, {"id": 46, "ch": "Thermal Physics", "preview": "A bimetallic strip is made up of two metals with linear expansion coefficients (…) and (…)", "ans": 0}, {"id": 47, "ch": "Thermal Physics", "preview": "A planet of radius (…) and surface temperature (…) orbits a sun of radius (…) and surface", "ans": 3}, {"id": 48, "ch": "Thermal Physics", "preview": "Two vessels of equal volumes are connected together by a tube and contain a total of (…) i", "ans": 0}, {"id": 49, "ch": "Thermal Physics", "preview": "An ideal gas undergoes a heat cycle that is represented by the following (…)–(…) diagram w", "ans": 2}, {"id": 50, "ch": "Thermal Physics", "preview": "Zeyuan has a balloon with perfectly elastic and insulating walls. He first fills the ballo", "ans": 1}];
 let akAnswers = {};
 AK_QS.forEach(q=>{ akAnswers[q.id]=q.ans; });
+if (SHARED.ANSWER_KEY) {
+  AK_QS.forEach(q => {
+    if (Object.prototype.hasOwnProperty.call(SHARED.ANSWER_KEY, q.id)) {
+      q.ans = SHARED.ANSWER_KEY[q.id];
+    }
+  });
+  akAnswers = { ...SHARED.ANSWER_KEY };
+}
 
 function renderAK(){
   const tbody=document.getElementById('ak-tbody');
@@ -490,6 +516,157 @@ window.switchTab=function(n){
   _origSwitch(n);
   if(n===5) renderAK();
 };
+
+function rebuildDerivedData(){
+  allSubs = allSubs.map(enrichSubmission);
+  latestByID = {};
+  allSubs.forEach(s=>{
+    const id=getId(s);
+    if(id==='unknown')return;
+    if(!latestByID[id]||new Date(s.created_at)>new Date(latestByID[id].created_at)) latestByID[id]=s;
+  });
+}
+
+function setAns(qid, idx){
+  akAnswers[qid]=idx;
+  rebuildDerivedData();
+  render();
+  renderAK();
+}
+
+function exportIndex(){
+  const questionMeta = AK_QS.map(({ id, ch, preview }) => ({ id, ch, preview }));
+  const answerKey = {};
+  Object.keys(akAnswers).sort((a,b)=>Number(a)-Number(b)).forEach(key=>{
+    answerKey[key] = akAnswers[key];
+  });
+
+  const content = `window.SJPO_SHARED = (() => {
+  const TOTAL_QUESTIONS = ${TOTAL_QUESTIONS};
+
+  const ANSWER_KEY = ${JSON.stringify(answerKey, null, 2)};
+
+  const QUESTION_META = ${JSON.stringify(questionMeta, null, 2)};
+
+  function answerIndexToLabel(idx) {
+    return Number.isInteger(idx) && idx >= 0 ? String.fromCharCode(65 + idx) : "-";
+  }
+
+  function answerLabelToIndex(label) {
+    if (!label || label === "-") return null;
+    return label.charCodeAt(0) - 65;
+  }
+
+  function parseAnswerString(str) {
+    const result = {};
+    if (!str) return result;
+    for (const match of str.matchAll(/Q(\\d+):([A-E-])(?:\\((✓|✗|-)\\))?/g)) {
+      const qid = Number(match[1]);
+      const label = match[2];
+      const selectedIndex = answerLabelToIndex(label);
+      result[qid] = {
+        label,
+        selectedIndex,
+        correct: selectedIndex !== null && ANSWER_KEY[qid] === selectedIndex
+      };
+    }
+    return result;
+  }
+
+  function formatAnswerString(answersByQuestion) {
+    const parts = [];
+    for (let qid = 1; qid <= TOTAL_QUESTIONS; qid += 1) {
+      const entry = answersByQuestion[qid];
+      if (!entry || entry.selectedIndex === null || entry.selectedIndex === undefined) {
+        parts.push(\`Q\${qid}:-\`);
+        continue;
+      }
+      const label = answerIndexToLabel(entry.selectedIndex);
+      const correct = ANSWER_KEY[qid] === entry.selectedIndex ? "✓" : "✗";
+      parts.push(\`Q\${qid}:\${label}(\${correct})\`);
+    }
+    return parts.join(" ");
+  }
+
+  function recomputeSubmissionMetrics(str) {
+    const parsed = parseAnswerString(str);
+    let attempted = 0;
+    let correct = 0;
+    for (let qid = 1; qid <= TOTAL_QUESTIONS; qid += 1) {
+      const entry = parsed[qid];
+      if (!entry || entry.selectedIndex === null) continue;
+      attempted += 1;
+      if (entry.correct) correct += 1;
+    }
+    return {
+      parsed,
+      attempted,
+      correct,
+      total: TOTAL_QUESTIONS,
+      accuracy: attempted ? Math.round((correct / attempted) * 100) : 0
+    };
+  }
+
+  function escapeCsv(value) {
+    const stringValue = String(value ?? "");
+    return '"' + stringValue.replace(/"/g, '""') + '"';
+  }
+
+  return {
+    TOTAL_QUESTIONS,
+    ANSWER_KEY,
+    QUESTION_META,
+    answerIndexToLabel,
+    answerLabelToIndex,
+    parseAnswerString,
+    formatAnswerString,
+    recomputeSubmissionMetrics,
+    escapeCsv
+  };
+})();`;
+
+  const blob=new Blob([content],{type:'application/javascript'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='shared-data.js';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function exportCsv(){
+  if(!allSubs.length){
+    alert('No submissions to export yet.');
+    return;
+  }
+  const escapeCsv = SHARED.escapeCsv || ((value)=>`"${String(value ?? '').replace(/"/g, '""')}"`);
+  const rows = [[
+    'Student ID','Attempt','Submitted At','Score','Accuracy','Attempted','Answers'
+  ]];
+  const attemptByStudent = {};
+  allSubs
+    .slice()
+    .sort((a,b)=>new Date(a.created_at)-new Date(b.created_at))
+    .forEach(sub=>{
+      const id=getId(sub);
+      attemptByStudent[id]=(attemptByStudent[id]||0)+1;
+      rows.push([
+        id,
+        attemptByStudent[id],
+        new Date(sub.created_at).toISOString(),
+        `${sub._score}/${TOTAL_QUESTIONS}`,
+        `${sub._accuracy}%`,
+        sub._attempted,
+        sub.data.answers||''
+      ]);
+    });
+  const csv=rows.map(row=>row.map(escapeCsv).join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='teacher-results.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 </script>
 </body>
